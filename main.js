@@ -154,11 +154,29 @@ class ActivityMonitor {
     this.logInterval = logInterval;
     this.intervalId = null;
     this.keyboardListener = new GlobalKeyboardListener();
-    this.logFilePath = path.join(app.getPath("userData"), "activity-logs.json");
+
+    // Create a more user-friendly location for the log file
+    const logsDir = path.join(
+      app.getPath("documents"),
+      "BBShorts",
+      "ActivityLogs"
+    );
+
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(logsDir)) {
+      fs.mkdirSync(logsDir, { recursive: true });
+    }
+
+    // Use a date-based filename for better organization
+    const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD format
+    this.logFilePath = path.join(logsDir, `activity-log-${today}.json`);
 
     // Initialize log file if it doesn't exist
     if (!fs.existsSync(this.logFilePath)) {
       fs.writeFileSync(this.logFilePath, JSON.stringify([], null, 2));
+      console.log(`Created new activity log file at: ${this.logFilePath}`);
+    } else {
+      console.log(`Using existing activity log file at: ${this.logFilePath}`);
     }
   }
 
@@ -215,6 +233,7 @@ class ActivityMonitor {
         timestamp,
         keyPressCount: this.keyPressCount,
         interval: this.logInterval,
+        appRuntime: process.uptime(), // Add app runtime for additional context
       };
 
       // Reset counter after logging
@@ -222,7 +241,24 @@ class ActivityMonitor {
       this.keyPressCount = 0;
 
       // Read existing logs
-      const logs = JSON.parse(fs.readFileSync(this.logFilePath, "utf8"));
+      let logs = [];
+      try {
+        const fileContent = fs.readFileSync(this.logFilePath, "utf8");
+        logs = JSON.parse(fileContent);
+
+        // Ensure logs is an array
+        if (!Array.isArray(logs)) {
+          logs = [];
+          console.warn("Log file did not contain an array, creating new array");
+        }
+      } catch (readError) {
+        console.warn(
+          "Error reading log file, creating new file:",
+          readError.message
+        );
+        // If file is corrupted or can't be read, start with empty array
+        logs = [];
+      }
 
       // Add new log entry
       logs.push(logEntry);
@@ -230,19 +266,44 @@ class ActivityMonitor {
       // Write updated logs back to file
       fs.writeFileSync(this.logFilePath, JSON.stringify(logs, null, 2));
 
-      console.log(`Logged ${countToLog} key presses at ${timestamp}`);
+      console.log(
+        `Logged ${countToLog} key presses at ${timestamp} to ${this.logFilePath}`
+      );
 
       // Notify renderer if window exists
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("activity-logged", logEntry);
+        mainWindow.webContents.send("activity-logged", {
+          ...logEntry,
+          filePath: this.logFilePath,
+          totalEntries: logs.length,
+        });
       }
     } catch (error) {
       console.error("Error logging activity:", error);
 
       // Notify renderer of error
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("activity-log-error", error.message);
+        mainWindow.webContents.send("activity-log-error", {
+          message: error.message,
+          filePath: this.logFilePath,
+        });
       }
+    }
+  }
+
+  // Add method to get log file path
+  getLogFilePath() {
+    return this.logFilePath;
+  }
+
+  // Add method to get all logs
+  getAllLogs() {
+    try {
+      const fileContent = fs.readFileSync(this.logFilePath, "utf8");
+      return JSON.parse(fileContent);
+    } catch (error) {
+      console.error("Error reading logs:", error);
+      return [];
     }
   }
 }
@@ -252,4 +313,20 @@ ipcMain.on("set-activity-interval", (event, interval) => {
   if (activityMonitor) {
     activityMonitor.setLogInterval(interval);
   }
+});
+
+// Add IPC handler to get log file path
+ipcMain.handle("get-activity-log-path", () => {
+  if (activityMonitor) {
+    return activityMonitor.getLogFilePath();
+  }
+  return null;
+});
+
+// Add IPC handler to get all logs
+ipcMain.handle("get-all-activity-logs", () => {
+  if (activityMonitor) {
+    return activityMonitor.getAllLogs();
+  }
+  return [];
 });
