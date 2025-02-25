@@ -10,6 +10,29 @@
     <label for="interval">Screenshot Interval (ms):</label>
     <input type="number" id="interval" value="1000">
     <button id="save">Save</button>
+    <div class="settings-section">
+      <h3>Activity Monitoring</h3>
+      <div class="setting-row">
+        <label for="activity-toggle">Activity Monitoring:</label>
+        <div class="toggle-switch">
+          <input type="checkbox" id="activity-toggle" checked>
+          <span class="toggle-slider"></span>
+        </div>
+        <span id="activity-status">ON</span>
+      </div>
+      
+      <div class="setting-row">
+        <label for="activity-interval">Log Interval (ms):</label>
+        <input type="number" id="activity-interval" min="1000" step="1000" value="5000">
+        <button id="set-activity-interval">Set</button>
+      </div>
+      
+      <div class="activity-stats">
+        <p>Last log: <span id="last-log-time">Never</span></p>
+        <p>Keys pressed: <span id="keys-pressed">0</span></p>
+        <p>Log file: <span id="log-file-path">Unknown</span></p>
+      </div>
+    </div>
     <script src="renderer.js"></script>
 </body>
 </html> 

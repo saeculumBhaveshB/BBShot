@@ -42,8 +42,9 @@ app.on("ready", () => {
   setupTray();
   startScreenshotInterval();
 
-  // Initialize activity monitor with default interval (5 seconds)
-  activityMonitor = new ActivityMonitor(5000).start();
+  // Initialize activity monitor with default interval (5 seconds) and enabled
+  activityMonitor = new ActivityMonitor(5000);
+  activityMonitor.setEnabled(true); // Explicitly enable it
 });
 
 function setupTray() {
@@ -153,7 +154,8 @@ class ActivityMonitor {
     this.keyPressCount = 0;
     this.logInterval = logInterval;
     this.intervalId = null;
-    this.keyboardListener = new GlobalKeyboardListener();
+    this.keyboardListener = null;
+    this.isEnabled = true; // Default to enabled
 
     // Create a more user-friendly location for the log file
     const logsDir = path.join(
@@ -181,9 +183,19 @@ class ActivityMonitor {
   }
 
   start() {
+    if (!this.isEnabled) {
+      console.log("Activity monitoring is disabled");
+      return this;
+    }
+
     console.log(
       `Starting keyboard activity monitoring with ${this.logInterval}ms interval`
     );
+
+    // Initialize keyboard listener if not already created
+    if (!this.keyboardListener) {
+      this.keyboardListener = new GlobalKeyboardListener();
+    }
 
     // Set up keyboard listener
     this.keyboardListener.addListener((e) => {
@@ -212,8 +224,40 @@ class ActivityMonitor {
     }
 
     // Remove keyboard listener
-    this.keyboardListener.kill();
+    if (this.keyboardListener) {
+      this.keyboardListener.kill();
+      this.keyboardListener = null;
+    }
+
     console.log("Keyboard activity monitoring stopped");
+  }
+
+  // Add method to enable/disable monitoring
+  setEnabled(enabled) {
+    if (this.isEnabled === enabled) {
+      return; // No change needed
+    }
+
+    this.isEnabled = enabled;
+    console.log(`Activity monitoring ${enabled ? "enabled" : "disabled"}`);
+
+    if (enabled) {
+      this.start(); // Start monitoring if enabled
+    } else {
+      this.stop(); // Stop monitoring if disabled
+    }
+
+    // Notify renderer of state change
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("activity-monitor-state-changed", {
+        enabled: this.isEnabled,
+      });
+    }
+  }
+
+  // Add method to get current enabled state
+  isMonitoringEnabled() {
+    return this.isEnabled;
   }
 
   setLogInterval(interval) {
@@ -329,4 +373,19 @@ ipcMain.handle("get-all-activity-logs", () => {
     return activityMonitor.getAllLogs();
   }
   return [];
+});
+
+// Add IPC handler for toggling activity monitoring
+ipcMain.on("toggle-activity-monitoring", (event, enabled) => {
+  if (activityMonitor) {
+    activityMonitor.setEnabled(enabled);
+  }
+});
+
+// Add IPC handler to get current monitoring state
+ipcMain.handle("get-activity-monitoring-state", () => {
+  if (activityMonitor) {
+    return activityMonitor.isMonitoringEnabled();
+  }
+  return false;
 });
