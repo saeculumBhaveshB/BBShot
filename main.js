@@ -165,6 +165,7 @@ class ActivityMonitor {
     this.isEnabled = true; // Default to enabled
     this.activeApp = null;
     this.activeUrl = null;
+    this.detailedContent = null;
 
     // Create a more user-friendly location for the log file
     const logsDir = path.join(
@@ -252,56 +253,257 @@ class ActivityMonitor {
     }
   }
 
-  // Get the currently active application
+  // Get the currently active application with robust error handling
   getActiveApplication() {
     try {
-      let activeApp = null;
+      let activeApp = "Unknown";
+      let detailedContent = "Unknown content";
 
+      // Platform-specific implementations
       if (process.platform === "darwin") {
         // macOS implementation
-        const script =
-          'tell application "System Events" to get name of first application process whose frontmost is true';
-        activeApp = execSync(`osascript -e '${script}'`).toString().trim();
+        try {
+          // Get the active application name
+          const script =
+            'tell application "System Events" to get name of first application process whose frontmost is true';
+          activeApp = execSync(`osascript -e '${script}'`).toString().trim();
+
+          // Get the window title for more details
+          const titleScript = `
+            tell application "System Events"
+              tell process "${activeApp}"
+                try
+                  set windowTitle to name of window 1
+                  return windowTitle
+                on error
+                  return "No window title available"
+                end try
+              end tell
+            end tell
+          `;
+
+          const windowTitle = execSync(`osascript -e '${titleScript}'`)
+            .toString()
+            .trim();
+          console.log(`Window title: ${windowTitle}`);
+
+          // Process specific applications
+          if (activeApp.toLowerCase().includes("code")) {
+            // VSCode
+            if (windowTitle.includes(" - ")) {
+              const parts = windowTitle.split(" - ");
+              if (parts.length >= 2) {
+                const file = parts[0];
+                const project =
+                  parts.length >= 3 ? parts[1] : "Unknown project";
+                const fileExt = path.extname(file).toLowerCase();
+                detailedContent = `Project: ${project}, File: ${file}`;
+              } else {
+                detailedContent = windowTitle;
+              }
+            } else {
+              detailedContent = windowTitle;
+            }
+          } else if (
+            activeApp.toLowerCase().includes("chrome") ||
+            activeApp.toLowerCase().includes("safari") ||
+            activeApp.toLowerCase().includes("firefox")
+          ) {
+            // Browser - will get more details in getActiveUrl
+            detailedContent = windowTitle;
+          } else if (activeApp.toLowerCase().includes("slack")) {
+            // Slack
+            if (windowTitle.includes(" | Slack")) {
+              const channel = windowTitle.replace(" | Slack", "");
+              detailedContent = `Channel: ${channel}`;
+            } else {
+              detailedContent = windowTitle;
+            }
+          } else if (
+            activeApp.toLowerCase().includes("terminal") ||
+            activeApp.toLowerCase().includes("iterm")
+          ) {
+            // Terminal
+            detailedContent = `Terminal: ${windowTitle}`;
+          } else {
+            // Other applications
+            detailedContent = windowTitle;
+          }
+        } catch (macError) {
+          console.error("Error getting macOS application details:", macError);
+          activeApp = "Unknown macOS application";
+          detailedContent = "Error getting details";
+        }
       } else if (process.platform === "win32") {
         // Windows implementation
-        const output = execSync(
-          "powershell \"Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Sort-Object -Property MainWindowTitle | Select-Object -First 1 -ExpandProperty ProcessName\""
-        )
-          .toString()
-          .trim();
-        activeApp = output;
-      } else if (process.platform === "linux") {
-        // Linux implementation (requires xdotool)
         try {
+          // Use a simpler, more reliable PowerShell command
+          const output = execSync(
+            "powershell \"Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object -First 1 | Format-List Name, MainWindowTitle\""
+          )
+            .toString()
+            .trim();
+
+          const nameMatch = output.match(/Name\s*:\s*(.*)/);
+          const titleMatch = output.match(/MainWindowTitle\s*:\s*(.*)/);
+
+          const processName = nameMatch ? nameMatch[1].trim() : "Unknown";
+          const windowTitle = titleMatch ? titleMatch[1].trim() : "";
+
+          activeApp = processName;
+
+          // Process specific applications
+          if (processName.toLowerCase().includes("code")) {
+            // VSCode
+            if (windowTitle.includes(" - ")) {
+              const parts = windowTitle.split(" - ");
+              if (parts.length >= 2) {
+                const file = parts[0];
+                const project =
+                  parts.length >= 3 ? parts[1] : "Unknown project";
+                detailedContent = `Project: ${project}, File: ${file}`;
+              } else {
+                detailedContent = windowTitle;
+              }
+            } else {
+              detailedContent = windowTitle;
+            }
+          } else if (
+            processName.toLowerCase().includes("chrome") ||
+            processName.toLowerCase().includes("firefox") ||
+            processName.toLowerCase().includes("edge") ||
+            processName.toLowerCase().includes("iexplore")
+          ) {
+            // Browser - will get more details in getActiveUrl
+            detailedContent = windowTitle;
+          } else if (processName.toLowerCase().includes("slack")) {
+            // Slack
+            if (windowTitle.includes(" | Slack")) {
+              const channel = windowTitle.replace(" | Slack", "");
+              detailedContent = `Channel: ${channel}`;
+            } else {
+              detailedContent = windowTitle;
+            }
+          } else {
+            // Other applications
+            detailedContent = windowTitle;
+          }
+        } catch (winError) {
+          console.error("Error getting Windows application details:", winError);
+
+          // Try an even simpler approach as fallback
+          try {
+            const simpleOutput = execSync(
+              "powershell \"Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Select-Object -First 1 -ExpandProperty Name\""
+            )
+              .toString()
+              .trim();
+
+            activeApp = simpleOutput;
+            detailedContent = "Window title unavailable";
+          } catch (fallbackError) {
+            console.error("Fallback also failed:", fallbackError);
+            activeApp = "Unknown Windows application";
+            detailedContent = "Error getting details";
+          }
+        }
+      } else if (process.platform === "linux") {
+        // Linux implementation
+        try {
+          // First try xdotool which is commonly available
           const windowId = execSync("xdotool getactivewindow")
             .toString()
             .trim();
           const windowName = execSync(`xdotool getwindowname ${windowId}`)
             .toString()
             .trim();
-          activeApp = windowName;
-        } catch (error) {
-          console.error("Error getting active window on Linux:", error);
-          activeApp = "Unknown (Linux)";
+          const processName = execSync(
+            `xdotool getwindowpid ${windowId} | xargs -I{} ps -p {} -o comm=`
+          )
+            .toString()
+            .trim();
+
+          activeApp = processName;
+
+          // Process specific applications
+          if (processName.toLowerCase().includes("code")) {
+            // VSCode
+            if (windowName.includes(" - ")) {
+              const parts = windowName.split(" - ");
+              if (parts.length >= 2) {
+                const file = parts[0];
+                const project =
+                  parts.length >= 3 ? parts[1] : "Unknown project";
+                detailedContent = `Project: ${project}, File: ${file}`;
+              } else {
+                detailedContent = windowName;
+              }
+            } else {
+              detailedContent = windowName;
+            }
+          } else if (
+            processName.toLowerCase().includes("chrome") ||
+            processName.toLowerCase().includes("firefox") ||
+            processName.toLowerCase().includes("chromium")
+          ) {
+            // Browser - will get more details in getActiveUrl
+            detailedContent = windowName;
+          } else if (processName.toLowerCase().includes("slack")) {
+            // Slack
+            if (windowName.includes(" | Slack")) {
+              const channel = windowName.replace(" | Slack", "");
+              detailedContent = `Channel: ${channel}`;
+            } else {
+              detailedContent = windowName;
+            }
+          } else {
+            // Other applications
+            detailedContent = windowName;
+          }
+        } catch (linuxError) {
+          console.error(
+            "Error getting Linux application details with xdotool:",
+            linuxError
+          );
+
+          // Try wmctrl as fallback
+          try {
+            const windowInfo = execSync("wmctrl -a :ACTIVE: -v")
+              .toString()
+              .trim();
+            const windowTitle = windowInfo.split("\n").pop() || "Unknown";
+
+            activeApp = "Unknown Linux App";
+            detailedContent = windowTitle;
+          } catch (fallbackError) {
+            console.error("Fallback with wmctrl also failed:", fallbackError);
+            activeApp = "Unknown Linux application";
+            detailedContent = "Error getting details";
+          }
         }
       } else {
         activeApp = "Unknown (Unsupported OS)";
+        detailedContent = "Unknown content";
       }
 
       this.activeApp = activeApp;
+      this.detailedContent = detailedContent;
       console.log(`Active application: ${this.activeApp}`);
+      console.log(`Detailed content: ${this.detailedContent}`);
       return activeApp;
     } catch (error) {
       console.error("Error getting active application:", error);
       this.activeApp = "Error detecting application";
+      this.detailedContent = "Error detecting content";
       return this.activeApp;
     }
   }
 
-  // Get the active URL from browsers
+  // Get the active URL from browsers with robust error handling
   getActiveUrl() {
     try {
       let activeUrl = null;
+      let pageTitle = null;
 
       // Check if the active application is a known browser
       const browsers = [
@@ -322,18 +524,38 @@ class ActivityMonitor {
         if (process.platform === "darwin") {
           // macOS implementation
           let script = "";
+          let titleScript = "";
 
           if (
             activeBrowser === "chrome" ||
             activeBrowser === "brave" ||
-            activeBrowser === "chromium"
+            activeBrowser === "chromium" ||
+            activeBrowser === "edge"
           ) {
             script = `tell application "Google Chrome" to get URL of active tab of front window`;
+            titleScript = `tell application "Google Chrome" to get title of active tab of front window`;
           } else if (activeBrowser === "safari") {
             script = `tell application "Safari" to get URL of current tab of front window`;
+            titleScript = `tell application "Safari" to get name of current tab of front window`;
           } else if (activeBrowser === "firefox") {
             // Firefox is more complex and may require a browser extension
             activeUrl = "Firefox URL detection requires extension";
+
+            // Try to get the page title from window title
+            try {
+              const firefoxTitleScript =
+                'tell application "System Events" to get name of window 1 of process "Firefox"';
+              const windowTitle = execSync(
+                `osascript -e '${firefoxTitleScript}'`
+              )
+                .toString()
+                .trim();
+              // Firefox window title format: "Page Title - Mozilla Firefox"
+              pageTitle = windowTitle.replace(" - Mozilla Firefox", "");
+            } catch (err) {
+              console.error("Error getting Firefox title:", err);
+              pageTitle = "Unknown page";
+            }
           }
 
           if (script) {
@@ -341,24 +563,80 @@ class ActivityMonitor {
               activeUrl = execSync(`osascript -e '${script}'`)
                 .toString()
                 .trim();
+              // Also get the page title for more context
+              if (titleScript) {
+                pageTitle = execSync(`osascript -e '${titleScript}'`)
+                  .toString()
+                  .trim();
+              }
             } catch (error) {
               console.error(`Error getting URL from ${activeBrowser}:`, error);
               activeUrl = `Error getting URL from ${activeBrowser}`;
+              pageTitle = "Unknown page";
             }
           }
         } else if (process.platform === "win32") {
-          // Windows implementation is complex and often requires browser extensions
-          // This is a placeholder - actual implementation would need browser-specific solutions
-          activeUrl = `URL detection on Windows for ${activeBrowser} requires extension`;
+          // For Windows, we can try to get the browser tab title which often includes the page title
+          // This is a partial solution - full URL detection would need browser extensions
+          if (this.detailedContent) {
+            // The window title often contains the page title
+            pageTitle = this.detailedContent;
+
+            // For Chrome-based browsers, we can try to extract more info
+            if (
+              activeBrowser === "chrome" ||
+              activeBrowser === "edge" ||
+              activeBrowser === "brave"
+            ) {
+              // Try to use Chrome DevTools Protocol (requires Chrome to be started with remote debugging)
+              try {
+                // This is a placeholder - actual implementation would require setting up CDP
+                activeUrl =
+                  "URL detection on Windows requires extension or remote debugging";
+              } catch (err) {
+                console.error("Error using CDP for URL detection:", err);
+                activeUrl = "URL detection failed";
+              }
+            } else {
+              activeUrl = "URL detection on Windows requires extension";
+            }
+          }
+        } else if (process.platform === "linux") {
+          // For Linux, we can try to get the browser tab title from window title
+          if (this.detailedContent) {
+            pageTitle = this.detailedContent;
+
+            // For Firefox on Linux, we might extract from window title
+            if (
+              activeBrowser === "firefox" &&
+              pageTitle.includes(" - Mozilla Firefox")
+            ) {
+              pageTitle = pageTitle.replace(" - Mozilla Firefox", "");
+            }
+            // For Chrome on Linux
+            else if (
+              (activeBrowser === "chrome" || activeBrowser === "chromium") &&
+              pageTitle.includes(" - Google Chrome")
+            ) {
+              pageTitle = pageTitle.replace(" - Google Chrome", "");
+            }
+
+            activeUrl = "URL detection on Linux requires extension";
+          }
         } else {
           activeUrl = "URL detection not implemented for this OS";
+          pageTitle = "Unknown page";
         }
-      } else {
-        activeUrl = "Not a browser";
+
+        // Update detailed content for browsers
+        this.detailedContent = `Page: ${pageTitle || "Unknown"}, URL: ${
+          activeUrl || "Unknown"
+        }`;
       }
 
       this.activeUrl = activeUrl;
       console.log(`Active URL: ${this.activeUrl}`);
+      console.log(`Page Title: ${pageTitle || "Unknown"}`);
       return activeUrl;
     } catch (error) {
       console.error("Error getting active URL:", error);
@@ -437,6 +715,7 @@ class ActivityMonitor {
         appRuntime: process.uptime(),
         activeApplication: this.activeApp,
         activeUrl: this.activeUrl,
+        detailedContent: this.detailedContent || "No content details available",
       };
 
       // Reset counters after logging
@@ -518,6 +797,7 @@ class ActivityMonitor {
     return {
       activeApplication: this.activeApp,
       activeUrl: this.activeUrl,
+      detailedContent: this.detailedContent || "No content details available",
     };
   }
 }
@@ -565,5 +845,5 @@ ipcMain.handle("get-active-app-info", () => {
   if (activityMonitor) {
     return activityMonitor.getCurrentActiveInfo();
   }
-  return { activeApplication: null, activeUrl: null };
+  return { activeApplication: null, activeUrl: null, detailedContent: null };
 });
