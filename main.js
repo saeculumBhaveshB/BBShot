@@ -163,6 +163,8 @@ class ActivityMonitor {
     this.intervalId = null;
     this.globalListener = null; // Single listener for both keyboard and mouse
     this.isEnabled = true; // Default to enabled
+    this.activeApp = null;
+    this.activeUrl = null;
 
     // Create a more user-friendly location for the log file
     const logsDir = path.join(
@@ -230,10 +232,139 @@ class ActivityMonitor {
     }
 
     // Log immediately and then at intervals
+    this.updateActiveAppAndUrl();
     this.logActivity();
-    this.intervalId = setInterval(() => this.logActivity(), this.logInterval);
+    this.intervalId = setInterval(() => {
+      this.updateActiveAppAndUrl();
+      this.logActivity();
+    }, this.logInterval);
 
     return this;
+  }
+
+  // Get active application and URL
+  updateActiveAppAndUrl() {
+    try {
+      this.getActiveApplication();
+      this.getActiveUrl();
+    } catch (error) {
+      console.error("Error updating active app and URL:", error);
+    }
+  }
+
+  // Get the currently active application
+  getActiveApplication() {
+    try {
+      let activeApp = null;
+
+      if (process.platform === "darwin") {
+        // macOS implementation
+        const script =
+          'tell application "System Events" to get name of first application process whose frontmost is true';
+        activeApp = execSync(`osascript -e '${script}'`).toString().trim();
+      } else if (process.platform === "win32") {
+        // Windows implementation
+        const output = execSync(
+          "powershell \"Get-Process | Where-Object {$_.MainWindowTitle -ne ''} | Sort-Object -Property MainWindowTitle | Select-Object -First 1 -ExpandProperty ProcessName\""
+        )
+          .toString()
+          .trim();
+        activeApp = output;
+      } else if (process.platform === "linux") {
+        // Linux implementation (requires xdotool)
+        try {
+          const windowId = execSync("xdotool getactivewindow")
+            .toString()
+            .trim();
+          const windowName = execSync(`xdotool getwindowname ${windowId}`)
+            .toString()
+            .trim();
+          activeApp = windowName;
+        } catch (error) {
+          console.error("Error getting active window on Linux:", error);
+          activeApp = "Unknown (Linux)";
+        }
+      } else {
+        activeApp = "Unknown (Unsupported OS)";
+      }
+
+      this.activeApp = activeApp;
+      console.log(`Active application: ${this.activeApp}`);
+      return activeApp;
+    } catch (error) {
+      console.error("Error getting active application:", error);
+      this.activeApp = "Error detecting application";
+      return this.activeApp;
+    }
+  }
+
+  // Get the active URL from browsers
+  getActiveUrl() {
+    try {
+      let activeUrl = null;
+
+      // Check if the active application is a known browser
+      const browsers = [
+        "chrome",
+        "firefox",
+        "safari",
+        "edge",
+        "brave",
+        "opera",
+        "chromium",
+      ];
+      const activeBrowser = browsers.find(
+        (browser) =>
+          this.activeApp && this.activeApp.toLowerCase().includes(browser)
+      );
+
+      if (activeBrowser) {
+        if (process.platform === "darwin") {
+          // macOS implementation
+          let script = "";
+
+          if (
+            activeBrowser === "chrome" ||
+            activeBrowser === "brave" ||
+            activeBrowser === "chromium"
+          ) {
+            script = `tell application "Google Chrome" to get URL of active tab of front window`;
+          } else if (activeBrowser === "safari") {
+            script = `tell application "Safari" to get URL of current tab of front window`;
+          } else if (activeBrowser === "firefox") {
+            // Firefox is more complex and may require a browser extension
+            activeUrl = "Firefox URL detection requires extension";
+          }
+
+          if (script) {
+            try {
+              activeUrl = execSync(`osascript -e '${script}'`)
+                .toString()
+                .trim();
+            } catch (error) {
+              console.error(`Error getting URL from ${activeBrowser}:`, error);
+              activeUrl = `Error getting URL from ${activeBrowser}`;
+            }
+          }
+        } else if (process.platform === "win32") {
+          // Windows implementation is complex and often requires browser extensions
+          // This is a placeholder - actual implementation would need browser-specific solutions
+          activeUrl = `URL detection on Windows for ${activeBrowser} requires extension`;
+        } else {
+          activeUrl = "URL detection not implemented for this OS";
+        }
+      } else {
+        activeUrl = "Not a browser";
+      }
+
+      this.activeUrl = activeUrl;
+      console.log(`Active URL: ${this.activeUrl}`);
+      return activeUrl;
+    } catch (error) {
+      console.error("Error getting active URL:", error);
+      this.activeUrl = "Error detecting URL";
+      return this.activeUrl;
+    }
   }
 
   stop() {
@@ -304,6 +435,8 @@ class ActivityMonitor {
         mouseClickCount: this.mouseClickCount,
         interval: this.logInterval,
         appRuntime: process.uptime(),
+        activeApplication: this.activeApp,
+        activeUrl: this.activeUrl,
       };
 
       // Reset counters after logging
@@ -341,6 +474,7 @@ class ActivityMonitor {
       console.log(
         `Logged ${keysToLog} key presses and ${clicksToLog} mouse clicks at ${timestamp} to ${this.logFilePath}`
       );
+      console.log(`Active app: ${this.activeApp}, URL: ${this.activeUrl}`);
 
       // Notify renderer if window exists
       if (mainWindow && !mainWindow.isDestroyed()) {
@@ -377,6 +511,14 @@ class ActivityMonitor {
       console.error("Error reading logs:", error);
       return [];
     }
+  }
+
+  // Get current active application and URL
+  getCurrentActiveInfo() {
+    return {
+      activeApplication: this.activeApp,
+      activeUrl: this.activeUrl,
+    };
   }
 }
 
@@ -416,4 +558,12 @@ ipcMain.handle("get-activity-monitoring-state", () => {
     return activityMonitor.isMonitoringEnabled();
   }
   return false;
+});
+
+// Add IPC handler to get current active application and URL
+ipcMain.handle("get-active-app-info", () => {
+  if (activityMonitor) {
+    return activityMonitor.getCurrentActiveInfo();
+  }
+  return { activeApplication: null, activeUrl: null };
 });
