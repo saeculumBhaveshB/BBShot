@@ -42,8 +42,9 @@ app.on("ready", () => {
   setupTray();
   startScreenshotInterval();
 
-  // Initialize activity monitor with default interval (5 seconds) and enabled
-  activityMonitor = new ActivityMonitor(5000);
+  // Initialize activity monitor with the same interval as screenshots
+  activityMonitor = new ActivityMonitor(screenshotInterval);
+  activityMonitor.start(); // Start the activity monitor explicitly
   activityMonitor.setEnabled(true); // Explicitly enable it
 });
 
@@ -123,6 +124,11 @@ async function takeScreenshot() {
 ipcMain.on("set-interval", (event, interval) => {
   screenshotInterval = interval;
   startScreenshotInterval();
+
+  // Update activity monitor interval to match
+  if (activityMonitor) {
+    activityMonitor.setLogInterval(interval);
+  }
 });
 
 app.on("window-all-closed", () => {
@@ -152,9 +158,10 @@ app.on("before-quit", () => {
 class ActivityMonitor {
   constructor(logInterval = 5000) {
     this.keyPressCount = 0;
+    this.mouseClickCount = 0;
     this.logInterval = logInterval;
     this.intervalId = null;
-    this.keyboardListener = null;
+    this.globalListener = null; // Single listener for both keyboard and mouse
     this.isEnabled = true; // Default to enabled
 
     // Create a more user-friendly location for the log file
@@ -189,19 +196,31 @@ class ActivityMonitor {
     }
 
     console.log(
-      `Starting keyboard activity monitoring with ${this.logInterval}ms interval`
+      `Starting keyboard and mouse activity monitoring with ${this.logInterval}ms interval`
     );
 
-    // Initialize keyboard listener if not already created
-    if (!this.keyboardListener) {
-      this.keyboardListener = new GlobalKeyboardListener();
+    // Initialize global listener if not already created
+    if (!this.globalListener) {
+      this.globalListener = new GlobalKeyboardListener();
     }
 
-    // Set up keyboard listener
-    this.keyboardListener.addListener((e) => {
-      // Only count key down events
+    // Set up a single listener with clear conditions to differentiate events
+    this.globalListener.addListener((e) => {
       if (e.state === "DOWN") {
-        this.keyPressCount++;
+        // Check if it's a mouse event based on the actual event structure
+        if (e.name && e.name.includes("MOUSE")) {
+          this.mouseClickCount++;
+          console.log(
+            `Mouse click detected: ${e.name}, count: ${this.mouseClickCount}`
+          );
+        }
+        // Otherwise it's a keyboard event
+        else {
+          this.keyPressCount++;
+          console.log(
+            `Keyboard press detected: ${e.name}, count: ${this.keyPressCount}`
+          );
+        }
       }
     });
 
@@ -223,13 +242,13 @@ class ActivityMonitor {
       this.intervalId = null;
     }
 
-    // Remove keyboard listener
-    if (this.keyboardListener) {
-      this.keyboardListener.kill();
-      this.keyboardListener = null;
+    // Remove global listener
+    if (this.globalListener) {
+      this.globalListener.kill();
+      this.globalListener = null;
     }
 
-    console.log("Keyboard activity monitoring stopped");
+    console.log("Keyboard and mouse activity monitoring stopped");
   }
 
   // Add method to enable/disable monitoring
@@ -273,16 +292,25 @@ class ActivityMonitor {
   logActivity() {
     try {
       const timestamp = new Date().toISOString();
+
+      // Log the current counts before resetting
+      console.log(
+        `Current counts - Keyboard: ${this.keyPressCount}, Mouse: ${this.mouseClickCount}`
+      );
+
       const logEntry = {
         timestamp,
         keyPressCount: this.keyPressCount,
+        mouseClickCount: this.mouseClickCount,
         interval: this.logInterval,
-        appRuntime: process.uptime(), // Add app runtime for additional context
+        appRuntime: process.uptime(),
       };
 
-      // Reset counter after logging
-      const countToLog = this.keyPressCount;
+      // Reset counters after logging
+      const keysToLog = this.keyPressCount;
+      const clicksToLog = this.mouseClickCount;
       this.keyPressCount = 0;
+      this.mouseClickCount = 0;
 
       // Read existing logs
       let logs = [];
@@ -311,7 +339,7 @@ class ActivityMonitor {
       fs.writeFileSync(this.logFilePath, JSON.stringify(logs, null, 2));
 
       console.log(
-        `Logged ${countToLog} key presses at ${timestamp} to ${this.logFilePath}`
+        `Logged ${keysToLog} key presses and ${clicksToLog} mouse clicks at ${timestamp} to ${this.logFilePath}`
       );
 
       // Notify renderer if window exists
