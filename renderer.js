@@ -14,6 +14,55 @@ const lastLogTime = document.getElementById("last-log-time");
 const keysPressed = document.getElementById("keys-pressed");
 const logFilePath = document.getElementById("log-file-path");
 
+// Initialize variables to track app usage
+let currentApp = null;
+let appStartTime = null;
+let idleStartTime = null;
+const idleThreshold = 300000; // 5 minutes
+
+// Function to log app usage
+function logAppUsage(appName, duration) {
+  console.log(`App: ${appName}, Duration: ${duration}ms`);
+  // Add code to store this data in a database or file
+}
+
+// Function to handle app focus change
+function onAppFocusChange(newApp) {
+  const now = Date.now();
+  if (currentApp) {
+    const duration = now - appStartTime;
+    logAppUsage(currentApp, duration);
+  }
+  currentApp = newApp;
+  appStartTime = now;
+}
+
+// Function to detect idle time
+function checkIdleTime() {
+  const now = Date.now();
+  if (currentApp && now - appStartTime > idleThreshold) {
+    logAppUsage("Idle", now - appStartTime);
+    currentApp = null;
+  }
+}
+
+// Function to log detailed activity context
+function logActivityContext(appName, context) {
+  console.log(`App: ${appName}, Context: ${JSON.stringify(context)}`);
+  // Add code to store this data in a database or file
+}
+
+// Example usage
+window.addEventListener("focus", (event) => {
+  const newApp = event.target.title; // Simplified example
+  onAppFocusChange(newApp);
+});
+
+setInterval(checkIdleTime, 60000); // Check idle time every minute
+
+// Add event listeners for specific actions like file open, tab switch, etc.
+// Example: document.addEventListener('fileOpen', (event) => logActivityContext('VSCode', { file: event.fileName }));
+
 // Initialize activity monitoring UI
 document.addEventListener("DOMContentLoaded", async () => {
   // Get current activity monitoring state
