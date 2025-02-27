@@ -1,4 +1,7 @@
 const { ipcRenderer } = require("electron");
+const os = require("os");
+const fs = require("fs");
+const path = require("path");
 
 document.getElementById("save").addEventListener("click", () => {
   const interval = document.getElementById("interval").value;
@@ -142,3 +145,43 @@ function showNotification(title, message, type = "info") {
     }, 500);
   }, 3000);
 }
+
+// Function to get system information
+function getSystemInfo() {
+  const platform = os.platform();
+  const architecture = os.arch();
+  const cpus = os.cpus();
+  const totalMemory = os.totalmem();
+  const freeMemory = os.freemem();
+  const uptime = os.uptime();
+
+  return {
+    platform,
+    architecture,
+    cpuCount: cpus.length,
+    totalMemory: (totalMemory / 1024 ** 3).toFixed(2) + " GB",
+    freeMemory: (freeMemory / 1024 ** 3).toFixed(2) + " GB",
+    uptime: (uptime / 3600).toFixed(2) + " hours",
+  };
+}
+
+// Function to write system information to a JSON file
+function writeSystemInfoToFile() {
+  const systemInfo = getSystemInfo();
+  const filePath = path.join(
+    "/Users/saeculummac_1/Documents/BBShorts/ActivityLogs",
+    "system-info.json"
+  );
+
+  fs.writeFile(filePath, JSON.stringify(systemInfo, null, 2), (err) => {
+    if (err) {
+      console.error("Error writing system information to file:", err);
+    } else {
+      console.log("System information written to", filePath);
+      console.log("File path:", filePath);
+    }
+  });
+}
+
+// Call the function to write system information when the app launches
+writeSystemInfoToFile();
