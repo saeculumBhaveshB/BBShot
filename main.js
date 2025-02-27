@@ -4,6 +4,7 @@ const screenshot = require("screenshot-desktop");
 const fs = require("fs");
 const { execSync } = require("child_process");
 const { GlobalKeyboardListener } = require("node-global-key-listener");
+const AutoLaunch = require("auto-launch");
 
 let mainWindow;
 let tray;
@@ -37,7 +38,7 @@ function createWindow() {
   });
 }
 
-app.on("ready", () => {
+app.whenReady().then(() => {
   createWindow();
   setupTray();
   startScreenshotInterval();
@@ -46,6 +47,23 @@ app.on("ready", () => {
   activityMonitor = new ActivityMonitor(screenshotInterval);
   activityMonitor.start(); // Start the activity monitor explicitly
   activityMonitor.setEnabled(true); // Explicitly enable it
+
+  // Auto-launch setup
+  const bbshotsAutoLauncher = new AutoLaunch({
+    name: "BBShots",
+    path: app.getPath("exe"),
+  });
+
+  bbshotsAutoLauncher
+    .isEnabled()
+    .then((isEnabled) => {
+      if (!isEnabled) {
+        bbshotsAutoLauncher.enable();
+      }
+    })
+    .catch((err) => {
+      console.error("Error enabling auto-launch:", err);
+    });
 });
 
 function setupTray() {
@@ -138,7 +156,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
-  if (mainWindow === null) {
+  if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
 });
