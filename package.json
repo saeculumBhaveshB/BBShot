@@ -1,13 +1,14 @@
 {
   "devDependencies": {
     "electron": "^34.2.0",
-    "electron-builder": "^24.3.0"
+    "electron-builder": "^25.1.8"
   },
   "name": "bbshots",
   "version": "1.0.0",
   "description": "Your app description here",
   "main": "main.js",
   "dependencies": {
+    "auto-launch": "^5.0.5",
     "boolean": "^3.2.0",
     "buffer-crc32": "^0.2.13",
     "cacheable-lookup": "^5.0.4",
@@ -69,13 +70,12 @@
     "undici-types": "^6.19.8",
     "universalify": "^0.1.2",
     "wrappy": "^1.0.2",
-    "yauzl": "^2.10.0",
-    "auto-launch": "^5.0.5"
+    "yauzl": "^2.10.0"
   },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron .",
-    "dist": "electron-builder"
+    "dist": "electron-builder --win"
   },
   "repository": {
     "type": "git",
@@ -90,32 +90,33 @@
   },
   "homepage": "https://github.com/saeculumBhaveshB/BBShots#readme",
   "build": {
-    "appId": "com.yourcompany.bbshots",
-    "mac": {
-      "category": "public.app-category.utilities",
-      "target": "dmg"
-    },
+    "appId": "com.saeculum.bbshots",
     "win": {
       "target": [
         {
           "target": "nsis",
           "arch": [
-            "x64",
-            "ia32"
+            "x64"
           ]
         }
       ],
-      "icon": "path/to/your/icon.ico",
-      "nsis": {
-        "oneClick": false,
-        "allowToChangeInstallationDirectory": true,
-        "createDesktopShortcut": true,
-        "createStartMenuShortcut": true,
-        "runAfterFinish": true
-      }
+      "icon": "path/to/your/icon.ico"
     },
-    "linux": {
-      "target": "AppImage"
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true
+    },
+    "files": [
+      "main.js",
+      "index.html",
+      "assets/**/*",
+      "node_modules/**/*"
+    ],
+    "directories": {
+      "buildResources": "build"
     }
   }
 }
