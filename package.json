@@ -75,7 +75,10 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "electron .",
-    "dist": "electron-builder --win"
+    "start-persistent": "node watchdog.js",
+    "dist": "electron-builder --win",
+    "dist-mac": "electron-builder --mac",
+    "dist-all": "electron-builder -mw"
   },
   "repository": {
     "type": "git",
@@ -91,6 +94,7 @@
   "homepage": "https://github.com/saeculumBhaveshB/BBShots#readme",
   "build": {
     "appId": "com.saeculum.bbshots",
+    "productName": "BBShots",
     "win": {
       "target": [
         {
@@ -100,20 +104,50 @@
           ]
         }
       ],
-      "icon": "path/to/your/icon.ico"
+      "icon": "assets/icon.ico"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.utilities",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "runAfterFinish": true
+      "runAfterFinish": true,
+      "include": "installer.nsh"
     },
     "files": [
       "main.js",
       "index.html",
+      "renderer.js",
+      "watchdog.js",
+      "startup.js",
       "assets/**/*",
       "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "node_modules/.bin",
+        "to": "app/node_modules/.bin",
+        "filter": [
+          "node*"
+        ]
+      }
     ],
     "directories": {
       "buildResources": "build"

@@ -1,16 +1,190 @@
-const { app, BrowserWindow, ipcMain, Tray } = require("electron");
+const { app, BrowserWindow, ipcMain, Tray, Menu } = require("electron");
 const path = require("path");
 const screenshot = require("screenshot-desktop");
 const fs = require("fs");
 const { execSync } = require("child_process");
 const { GlobalKeyboardListener } = require("node-global-key-listener");
 const AutoLaunch = require("auto-launch");
+const { globalShortcut } = require("electron");
+const { spawn } = require("child_process");
 
 let mainWindow;
 let tray;
 let screenshotInterval = 10000; // Default to 10 seconds
 let intervalId = null;
 let activityMonitor = null;
+let watchdogProcess = null;
+
+// Ensure app is single instance
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  // This is a second instance, quit immediately
+  app.quit();
+} else {
+  // This is the main instance
+  app.on("second-instance", (event, commandLine, workingDirectory) => {
+    // Someone tried to run a second instance, focus our window instead
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+
+  // Setup auto-restart mechanism but don't create multiple instances
+  setupAutoRestart();
+}
+
+// Function to setup auto-restart mechanism
+function setupAutoRestart() {
+  // Create a watchdog file to indicate the app is running
+  const watchdogFile = path.join(app.getPath("userData"), "watchdog.txt");
+
+  // Write current timestamp to watchdog file
+  function updateWatchdog() {
+    fs.writeFileSync(watchdogFile, Date.now().toString());
+  }
+
+  // Update watchdog file every minute
+  setInterval(updateWatchdog, 60000);
+  updateWatchdog(); // Initial update
+
+  // Setup auto-launch with system - but only once
+  let appPath;
+  if (process.platform === "darwin") {
+    // For macOS, we need the .app bundle path
+    appPath = process.execPath.replace(/Contents\/MacOS\/Electron$/, "");
+  } else if (process.platform === "win32") {
+    // For Windows, use the exe path
+    appPath = process.execPath;
+  } else {
+    // For Linux or other platforms
+    appPath = process.execPath;
+  }
+
+  const bbshotsAutoLauncher = new AutoLaunch({
+    name: "BBShots",
+    path: appPath,
+    isHidden: true,
+  });
+
+  bbshotsAutoLauncher
+    .isEnabled()
+    .then((isEnabled) => {
+      if (!isEnabled) {
+        bbshotsAutoLauncher
+          .enable()
+          .then(() => {
+            console.log("Auto-launch enabled successfully");
+          })
+          .catch((err) => {
+            console.error("Error enabling auto-launch:", err);
+          });
+      } else {
+        console.log("Auto-launch is already enabled");
+      }
+    })
+    .catch((err) => {
+      console.error("Error checking auto-launch status:", err);
+    });
+}
+
+// Create application menu
+function createAppMenu() {
+  const isMac = process.platform === "darwin";
+
+  const template = [
+    // App menu (macOS only)
+    ...(isMac
+      ? [
+          {
+            label: app.name,
+            submenu: [
+              { role: "about" },
+              { type: "separator" },
+              { role: "services" },
+              { type: "separator" },
+              { role: "hide" },
+              { role: "hideothers" },
+              { role: "unhide" },
+              // No quit option
+            ],
+          },
+        ]
+      : []),
+    // File menu
+    {
+      label: "File",
+      submenu: [
+        {
+          label: "Hide Window",
+          click: () => {
+            if (mainWindow) {
+              mainWindow.hide();
+            }
+          },
+        },
+        { type: "separator" },
+        {
+          label: "App runs persistently in background",
+          enabled: false,
+        },
+      ],
+    },
+    // Edit menu
+    {
+      label: "Edit",
+      submenu: [
+        { role: "undo" },
+        { role: "redo" },
+        { type: "separator" },
+        { role: "cut" },
+        { role: "copy" },
+        { role: "paste" },
+      ],
+    },
+    // View menu
+    {
+      label: "View",
+      submenu: [
+        { role: "reload" },
+        { role: "forceReload" },
+        { role: "toggleDevTools" },
+        { type: "separator" },
+        { role: "resetZoom" },
+        { role: "zoomIn" },
+        { role: "zoomOut" },
+        { type: "separator" },
+        { role: "togglefullscreen" },
+      ],
+    },
+    // Help menu
+    {
+      label: "Help",
+      submenu: [
+        {
+          label: "About BBShots",
+          click: async () => {
+            const { shell } = require("electron");
+            await shell.openExternal("https://github.com/seaculum/BBShot");
+          },
+        },
+        { type: "separator" },
+        {
+          label: "BBShots runs continuously in background",
+          enabled: false,
+        },
+        {
+          label: "App can only be removed by uninstalling",
+          enabled: false,
+        },
+      ],
+    },
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
 
 function createWindow() {
   console.log("Creating window...");
@@ -33,43 +207,66 @@ function createWindow() {
     mainWindow.show();
   });
 
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
-}
+  mainWindow.on("close", (event) => {
+    // Prevent the window from closing by default
+    event.preventDefault();
 
-app.whenReady().then(() => {
-  createWindow();
-  setupTray();
-  startScreenshotInterval();
+    // Hide the window instead of closing it
+    mainWindow.hide();
 
-  // Initialize activity monitor with the same interval as screenshots
-  activityMonitor = new ActivityMonitor(screenshotInterval);
-  activityMonitor.start(); // Start the activity monitor explicitly
-  activityMonitor.setEnabled(true); // Explicitly enable it
-
-  // Auto-launch setup
-  const bbshotsAutoLauncher = new AutoLaunch({
-    name: "BBShots",
-    path: app.getPath("exe"),
-  });
-
-  bbshotsAutoLauncher
-    .isEnabled()
-    .then((isEnabled) => {
-      if (!isEnabled) {
-        bbshotsAutoLauncher.enable();
-      }
-    })
-    .catch((err) => {
-      console.error("Error enabling auto-launch:", err);
+    // Notify the user that the app is still running in the background
+    mainWindow.webContents.send("app-minimized-to-tray", {
+      message:
+        "BBShots is still running in the background. You can access it from the system tray.",
     });
-});
+
+    return false;
+  });
+
+  // Register global shortcut to show app window (Cmd+Shift+B or Ctrl+Shift+B)
+  globalShortcut.register("CommandOrControl+Shift+B", () => {
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+
+  setupTray();
+}
 
 function setupTray() {
   try {
     tray = new Tray(path.join(__dirname, "assets", "icon.png"));
-    tray.setToolTip("BBShorts");
+    tray.setToolTip("BBShots - Always Running");
+
+    const contextMenu = Menu.buildFromTemplate([
+      { label: "Show App", click: () => mainWindow.show() },
+      { type: "separator" },
+      { label: "Status: Always Running", enabled: false },
+      { label: "BBShots is running in the background", enabled: false },
+      { type: "separator" },
+      {
+        label: "About BBShots",
+        click: async () => {
+          const { shell } = require("electron");
+          await shell.openExternal("https://github.com/seaculum/BBShot");
+        },
+      },
+      // Hidden developer option - only accessible if you know it's there
+      { type: "separator" },
+      {
+        label: "DEVELOPER: Force Quit App",
+        visible: process.env.NODE_ENV === "development",
+        click: () => {
+          // This is a special force quit that bypasses our prevention mechanisms
+          // It should only be used during development
+          app.exit(0); // Force quit with exit code 0
+        },
+      },
+    ]);
+
+    tray.setContextMenu(contextMenu);
+
     tray.on("click", () => {
       if (mainWindow) {
         mainWindow.isVisible() ? mainWindow.hide() : mainWindow.show();
@@ -79,6 +276,48 @@ function setupTray() {
     console.error("Error setting up tray:", error);
   }
 }
+
+app.whenReady().then(() => {
+  createWindow();
+  startScreenshotInterval();
+  createAppMenu();
+
+  // Initialize activity monitor
+  activityMonitor = new ActivityMonitor();
+  activityMonitor.start(); // Start monitoring
+
+  // Prevent the app from being terminated by intercepting quit signals
+  process.on("SIGINT", () => {
+    console.log("Received SIGINT - ignoring and continuing to run");
+    // Prevent default quit behavior
+    return false;
+  });
+
+  process.on("SIGTERM", () => {
+    console.log("Received SIGTERM - ignoring and continuing to run");
+    // Prevent default quit behavior
+    return false;
+  });
+
+  process.on("SIGHUP", () => {
+    console.log("Received SIGHUP - ignoring and continuing to run");
+    // Prevent default quit behavior
+    return false;
+  });
+
+  // Prevent the app from quitting
+  app.on("before-quit", (event) => {
+    console.log("Preventing app from quitting");
+    event.preventDefault();
+
+    // If the window exists, just hide it instead
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.hide();
+    }
+
+    return false;
+  });
+});
 
 function startScreenshotInterval() {
   console.log(`Starting screenshot interval: ${screenshotInterval}ms`);
@@ -149,26 +388,16 @@ ipcMain.on("set-interval", (event, interval) => {
   }
 });
 
+// Prevent app from quitting when all windows are closed
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  console.log("All windows closed, but keeping app running in the background");
+  // Do not call app.quit() here to keep the app running
+  return false;
 });
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
-  }
-});
-
-app.on("before-quit", () => {
-  if (intervalId) {
-    clearInterval(intervalId);
-  }
-
-  // Stop activity monitor
-  if (activityMonitor) {
-    activityMonitor.stop();
   }
 });
 
@@ -865,3 +1094,16 @@ ipcMain.handle("get-active-app-info", () => {
   }
   return { activeApplication: null, activeUrl: null, detailedContent: null };
 });
+
+const autoLauncher = new AutoLaunch({
+  name: "ActivityMonitor",
+});
+
+autoLauncher
+  .isEnabled()
+  .then((isEnabled) => {
+    if (!isEnabled) autoLauncher.enable();
+  })
+  .catch((err) => {
+    console.error("Auto-launch error:", err);
+  });

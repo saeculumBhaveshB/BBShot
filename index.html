@@ -4,6 +4,49 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BBShorts Settings</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .settings-section {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .setting-row {
+            margin-bottom: 10px;
+        }
+        .shortcut-info {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f8f8f8;
+            border-left: 4px solid #4CAF50;
+        }
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background-color: #333;
+            color: white;
+            border-radius: 5px;
+            opacity: 1;
+            transition: opacity 0.5s;
+        }
+        .notification.fade-out {
+            opacity: 0;
+        }
+        .notification.error {
+            background-color: #f44336;
+        }
+        .notification.info {
+            background-color: #2196F3;
+        }
+    </style>
 </head>
 <body>
     <h1>BBShorts Settings</h1>
@@ -33,6 +76,19 @@
         <p>Log file: <span id="log-file-path">Unknown</span></p>
       </div>
     </div>
+    
+    <div class="shortcut-info">
+      <h3>App Information</h3>
+      <p><strong>Persistent Background Operation:</strong> BBShots is designed to run continuously in the background and cannot be stopped except by uninstalling the application.</p>
+      <p><strong>Closing the window:</strong> When you close the window, the app continues running in the background. You can access it from the system tray icon.</p>
+      <p><strong>Keyboard shortcut:</strong></p>
+      <ul>
+        <li><kbd>Ctrl+Shift+B</kbd> (Windows/Linux) or <kbd>Cmd+Shift+B</kbd> (Mac) to show the application window.</li>
+      </ul>
+      <p><strong>System tray:</strong> Click the BBShots icon in the system tray to show/hide the application window.</p>
+      <p><strong>Note:</strong> This application is designed to run continuously for monitoring purposes and cannot be terminated through normal means. To stop the application, you must uninstall it.</p>
+    </div>
+    
     <script src="renderer.js"></script>
 </body>
 </html> 

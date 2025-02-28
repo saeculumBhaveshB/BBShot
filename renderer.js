@@ -78,6 +78,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (path) {
     logFilePath.textContent = path;
   }
+
+  // Show persistent app notification
+  setTimeout(() => {
+    showNotification(
+      "BBShots Always Running",
+      "This application runs continuously in the background and can only be stopped by uninstalling it.",
+      "info"
+    );
+  }, 1000);
 });
 
 // Toggle activity monitoring
@@ -124,6 +133,11 @@ ipcRenderer.on("activity-monitor-state-changed", (event, { enabled }) => {
 // Listen for activity log errors
 ipcRenderer.on("activity-log-error", (event, { message }) => {
   showNotification("Activity Log Error", message, "error");
+});
+
+// Listen for app minimized to tray notification
+ipcRenderer.on("app-minimized-to-tray", (event, { message }) => {
+  showNotification("BBShots Running in Background", message, "info");
 });
 
 // Helper function to show notifications
